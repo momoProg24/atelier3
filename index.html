@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- 
+    Atelier #3
+    Auteur: Maurice Agboton, fevrier 2024 
+-->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hurricanes</title>
+    <style>
+        .controlsContainer {
+            display: grid;
+            grid-template-columns: 290px 200px auto;
+        }
+
+        .rangeContainer {
+            display: grid;
+            grid-template-columns: 50px 30px auto 30px 50px;
+            align-items: center;
+        }
+
+        .checkboxContainer {
+            display: grid;
+            grid-template-columns: 20px auto 20px auto 20px auto;
+            align-items: center;
+        }
+
+        #graphContainer {
+            width: 100px;
+            height: 820px;
+        }
+    </style>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+</head>
+
+<body>
+    <div style="margin:auto; width:96%;text-align: center;">
+        <div id="graphContainer" style="margin:center; width:100px; height:600px;"></div>
+    </div>
+    <div class="controlsContainer">
+        <fieldset>
+            <legend>Style</legend>
+            <input type="radio" name="graphStyle" id="bars" value="bars" checked>
+            <label for="bars">Bâtonnets</label>
+            <input type="radio" name="graphStyle" id="regions" value="regions">
+            <label for="regions">Régions</label>
+            <input type="radio" name="graphStyle" id="curves" value="curves">
+            <label for="curves">Courbes</label>
+        </fieldset>
+        <fieldset>
+            <legend>Type</legend>
+            <div class="checkboxContainer">
+                <input type="checkbox" id="showStorm" checked>
+                <div style="background-color: green;">&nbsp;</div>
+                <input type="checkbox" id="showHurricane_12" checked>
+                <div style="background-color: orange;">&nbsp;</div>
+                <input type="checkbox" id="showHurricane_345" checked>
+                <div style="background-color: red;">&nbsp;</div>
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>
+                Années
+            </legend>
+            <div class="rangeContainer">
+                <input type="text" id="start" value="1950">
+                <span>&nbsp;</span>
+                <div id="slider-range"></div>
+                <span>&nbsp;</span>
+                <input type="text" id="end" value="2023">
+            </div>
+        </fieldset>
+    </div>
+    <hr>
+    <div>
+        Auteur: Maurice Agboton <br>
+        Références : <a href="https://www.meteo-tropicale.fr/statistiques-cyclones-atantique/"
+            target="_blank">https://www.meteo-tropicale.fr/statistiques-cyclones-atantique/</a>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <script src="https://www.gstatic.com/charts/loader.js"></script>
+    <script defer>
+        google.charts.load('current', { packages: ['corechart'] });
+        google.charts.setOnLoadCallback(init_UI);
+
+        const serverHost = "https://api-server-2.glitch.me";
+        const hurricanes_API = "/api/hurricanes";
+        let graphStyle = "bars";
+
+        let showStorm = true;
+        let showHurricane_12 = true;
+        let showHurricane_345 = true;
+        let viewPortMaxUnitX = 500;
+        let viewPortMaxUnitY = 240;
+        let viewport = null;
+        let verticalScale = 5;
+        let yearWidth = 6.5;
+        let verticalOffset = 5;
+        let horizontalOffset = 10;
+        let mouseIsDown = false;
+
+        // Fonction pour initialiser l'interface de l'utilisateur
+         async function init_UI() {
+            drawGraph();
+            $("input[name='graphStyle']").on('change', function () {
+                graphStyle = $("input[name='graphStyle']:checked").val();
+                drawGraph();
+            });
+
+            $("#slider-range").slider({
+                range: true,
+                min: 1950,
+                max: 2023,
+                values: [1950, 2023],
+                slide: function (event, ui) {
+                    $("#start").val(ui.values[0]);
+                    $("#end").val(ui.values[1]);
+                }
+            });
+
+            $("#slider-range").on('pointerdown', e => { mouseIsDown = true; e.target.setPointerCapture(e.pointerId); })
+            $("body").on('pointerup', e => {
+                if (mouseIsDown) drawGraph();
+                e.target.releasePointerCapture(e.pointerId);
+                mouseIsDown = false;
+            });
+            $("#start").on("change", () => { $("#slider-range").slider('values', 0, $("#start").val()); drawGraph(); })
+            $("#end").on("change", () => { $("#slider-range").slider('values', 1, $("#end").val()); drawGraph(); })
+
+            $("#showStorm").on("change", () => { showStorm = $("#showStorm").is(':checked'); drawGraph(); })
+            $("#showHurricane_12").on("change", () => { showHurricane_12 = $("#showHurricane_12").is(':checked'); drawGraph(); })
+            $("#showHurricane_345").on("change", () => { showHurricane_345 = $("#showHurricane_345").is(':checked'); drawGraph(); })
+        }
+
+        // Fonction pour dessiner le graphique
+        async function drawGraph() {
+            $("#graphContainer").empty(); // Effacer le contenu précédent du graphique
+            hurricanesData = await GetHurricanesData(); // Récupérer les données
+            let graphData = [];
+            let graphOptions = {
+                title: "Historique des tempêtes de l'Atlantique",
+                legend: { position: 'top' },
+                width: 1400,
+                height: 600,
+                colors: ['#008000', '#FFA500', '#FF0000'] // Vert, Orange, Rouge
+                
+                
+            };
+            // Parcours les données des ouragans
+            hurricanesData.forEach(h => {
+                let year = h.Year.toString();
+                let storm = showStorm ? h.Storm : 0;
+                let hurricane12 = showHurricane_12 ? h.Cat1 + h.Cat2 : 0;
+                let hurricane345 = showHurricane_345 ? h.Cat3 + h.Cat4 + h.Cat5 : 0;
+
+                graphData.push([year, storm, hurricane12, hurricane345]);
+            });
+
+            
+            // Création d'un objet DataTable Google Charts stocker les données du graphique
+            let data = new google.visualization.DataTable();
+            data.addColumn('string', 'Year');
+            data.addColumn('number', 'Tempetes tropicales');
+            data.addColumn('number', 'Ouragans mineurs (catégories 1 et 2)');
+            data.addColumn('number', 'Ouragans majeurs (catégories 3 à 5)');
+            data.addRows(graphData); // Ajout des lignes de données au DataTable
+
+            let chart;
+            switch (graphStyle) {
+                case "bars":
+                    chart = new google.visualization.ColumnChart(document.getElementById('graphContainer'));
+                    break;
+                case "regions":
+                    chart = new google.visualization.AreaChart(document.getElementById('graphContainer'));
+                    break;
+                case "curves":
+                    chart = new google.visualization.LineChart(document.getElementById('graphContainer'));
+                    break;
+                default:
+                    chart = new google.visualization.ColumnChart(document.getElementById('graphContainer'));
+                    break;
+            }
+
+            chart.draw(data, graphOptions);
+        }
+
+        // Fonction récupérer les données des ouragans depuis l'API
+        function GetHurricanesData() {
+            return new Promise(resolve => {
+                $.ajax({
+                    url: serverHost + hurricanes_API + `?Year.start=${$("#start").val()}&Year.end=${$("#end").val()}`,
+                    type: 'GET',
+                    success: data => { resolve(data); },
+                    error: xhr => { console.log(xhr); resolve(false); }
+                });
+            });
+        }
+    </script>
+</html>
